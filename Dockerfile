@@ -6,7 +6,7 @@
 
 FROM debian:12.5-slim
 
-EXPOSE 80
+EXPOSE 3000
 WORKDIR /home
 
 # ============================================
@@ -35,7 +35,7 @@ RUN curl -fSL -o node.tar.gz https://nodejs.org/dist/v${NODE_VERSION}/node-v${NO
 # DOWNLOAD APPLICATION SOURCE
 # ============================================
 ARG GITHUB_REPO=mikmc55/kitsu
-ARG GITHUB_BRANCH=main4
+ARG GITHUB_BRANCH=main
 
 RUN curl -L -o source.zip https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.zip \
     && unzip source.zip && rm source.zip \

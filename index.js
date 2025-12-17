@@ -16,11 +16,17 @@ const { search } = require("./search_handler");
 
 const redis = redisClient();
 
-// Helper to extract infohash from magnet URI
-function extractInfoHash(magnetUri) {
-  if (!magnetUri) return null;
-  const match = magnetUri.match(/btih:([a-f0-9]{40})/i);
-  return match ? match[1].toLowerCase() : null;
+// Helper to detect if torrent is a batch/pack from title
+function isBatchPack(title) {
+  const batchIndicators = [
+    /batch/i,
+    /\d+-\d+/,  // e.g., "01-12"
+    /complete/i,
+    /season/i,
+    /\bS\d+\b/i,  // e.g., "S01"
+    /vol\s*\d+/i,
+  ];
+  return batchIndicators.some(pattern => pattern.test(title));
 }
 
 // ----------------------------------------------
@@ -213,10 +219,17 @@ app
       return -(+a["Peers"] - +b["Peers"]) ?? 0;
     });
 
+    // OPTIMIZATION: Prioritize single episodes over packs
+    let singleEpisodes = result.filter(t => !isBatchPack(t["Title"]));
+    let packs = result.filter(t => isBatchPack(t["Title"]));
+    
+    console.log({ singleEpisodes: singleEpisodes.length, packs: packs.length });
+
     result = [
-      ...(matches.length > 10 ? matches.slice(0, 10) : matches),
-      ...(batchResult.length > 10 ? batchResult.slice(0, 10) : batchResult),
-      ...result,
+      ...(matches.length > 8 ? matches.slice(0, 8) : matches),
+      ...(singleEpisodes.length > 5 ? singleEpisodes.slice(0, 5) : singleEpisodes),
+      ...(batchResult.length > 8 ? batchResult.slice(0, 8) : batchResult),
+      ...(packs.length > 3 ? packs.slice(0, 3) : packs), // Only include 3 packs as fallback
     ];
     result = removeDuplicate(result, "Title");
 
@@ -226,8 +239,8 @@ app
 
     console.log({ "Retenus for filtering": result.length });
 
-    // OPTIMIZATION: Reduced from 20 to 8
-    const MAX_RES = process.env.MAX_RES ?? 8;
+    // OPTIMIZATION: Reduced from 20 to 10
+    const MAX_RES = process.env.MAX_RES ?? 10;
     result = result?.length >= MAX_RES ? result.slice(0, MAX_RES) : result;
 
     // Filter out torrents with no magnet or peers
@@ -237,37 +250,57 @@ app
 
     console.log({ "Result after filtering": result.length });
 
-    // ============ OPTIMIZED: Skip torrent parsing, use magnets directly ============
-    let stream_results = result
-      .map((torrent) => {
-        let infoHash = torrent["InfoHash"] || extractInfoHash(torrent["MagnetUri"]);
-        
-        if (!infoHash) {
-          console.log("Skipping torrent without infohash:", torrent["Title"]);
+    // OPTIMIZATION: Parse torrents in parallel with higher concurrency
+    torrentParsed = await UTILS.queue(
+      result.map(
+        (torrent) => () =>
+          UTILS.getParsedFromMagnetorTorrentFile(torrent, torrent["MagnetUri"])
+      ),
+      10 // Increased from 5 to 10 for parallel processing
+    );
+    
+    torrentParsed = torrentParsed.filter(
+      (torrent) =>
+        torrent && torrent?.parsedTor && torrent?.parsedTor?.files?.length > 0
+    );
+
+    console.log({ "Parsed torrents": torrentParsed.length });
+
+    // ============ Generate streams with proper file selection ============
+    let stream_results = torrentParsed
+      .map((tor) => {
+        let parsed = tor.parsedTor;
+        let infoHash = parsed.infoHash.toLowerCase();
+
+        // Find video file that matches the episode/season
+        let index = parsed.files.findIndex((file) => {
+          let name = file.name?.toLowerCase() || "";
+          return (
+            UTILS.isVideo(file) &&
+            UTILS.getFittedFile(name, s, e, abs, abs_season, abs_episode)
+          );
+        });
+
+        // Skip if no matching video file found
+        if (index === -1) {
+          console.log(`No matching file in: ${tor.Title}`);
           return null;
         }
 
-        // Extract quality from title
-        let quality = "";
-        let title_lower = torrent["Title"].toLowerCase();
-        if (title_lower.includes("2160p") || title_lower.includes("4k")) {
-          quality = " 4K";
-        } else if (title_lower.includes("1080p")) {
-          quality = " 1080p";
-        } else if (title_lower.includes("720p")) {
-          quality = " 720p";
-        } else if (title_lower.includes("480p")) {
-          quality = " 480p";
-        }
+        let file = parsed.files[index];
 
-        // Create readable title
-        let displayTitle = `${torrent["Title"]}\n💾 ${torrent["Size"] || "Unknown size"} | 🌱 ${torrent["Seeders"]}S ${torrent["Peers"]}P`;
+        // Create title with torrent name, file name, size, and peer info
+        let title = `${tor.Title}\n${file.name}\n${UTILS.getSize(file.length)} | 🌱 ${tor.Seeders}S ${tor.Peers}P`;
 
+        // Return Stremio-compatible stream object
         return {
-          name: `Nyaa${quality}`,
-          title: displayTitle,
+          name: `Nyaa${UTILS.getQuality(file.name)}`,
+          title: title,
           infoHash: infoHash,
-          sources: [`tracker:${torrent["MagnetUri"]}`, `dht:${infoHash}`],
+          fileIdx: index,
+          sources: (parsed.announce || [])
+            .map((x) => `tracker:${x}`)
+            .concat([`dht:${infoHash}`]),
           behaviorHints: {
             bingeGroup: `nyaa|${infoHash}`,
             notWebReady: true,
@@ -275,7 +308,10 @@ app
         };
       })
       .filter((s) => s !== null);
-    // ============ END OPTIMIZATION ============
+    // ============ END ============
+
+    stream_results = stream_results.flat();
+    stream_results = Array.from(new Set(stream_results)).filter((e) => !!e);
 
     // Quality-based sorting
     stream_results = [

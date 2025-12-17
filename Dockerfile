@@ -6,7 +6,7 @@
 
 FROM debian:12.5-slim
 
-EXPOSE 3000
+EXPOSE 3003
 WORKDIR /home
 
 # ============================================
@@ -35,7 +35,7 @@ RUN curl -fSL -o node.tar.gz https://nodejs.org/dist/v${NODE_VERSION}/node-v${NO
 # DOWNLOAD APPLICATION SOURCE
 # ============================================
 ARG GITHUB_REPO=mikmc55/kitsu
-ARG GITHUB_BRANCH=main
+ARG GITHUB_BRANCH=main4
 
 RUN curl -L -o source.zip https://github.com/${GITHUB_REPO}/archive/refs/heads/${GITHUB_BRANCH}.zip \
     && unzip source.zip && rm source.zip \
@@ -46,9 +46,9 @@ RUN curl -L -o source.zip https://github.com/${GITHUB_REPO}/archive/refs/heads/$
 # ============================================
 ARG OLD_PORT=3003
 
-RUN find . -type f -name "*.js" -exec sed -i "s/${OLD_PORT}/3000/g" {} \; || true && \
-    find . -type f -name "*.json" -exec sed -i "s/${OLD_PORT}/3000/g" {} \; || true && \
-    find . -type f -name "*.ts" -exec sed -i "s/${OLD_PORT}/3000/g" {} \; || true
+RUN find . -type f -name "*.js" -exec sed -i "s/${OLD_PORT}/3003/g" {} \; || true && \
+    find . -type f -name "*.json" -exec sed -i "s/${OLD_PORT}/3003/g" {} \; || true && \
+    find . -type f -name "*.ts" -exec sed -i "s/${OLD_PORT}/3003/g" {} \; || true
 
 # ============================================
 # INSTALL DEPENDENCIES

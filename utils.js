@@ -1,13 +1,11 @@
-const path = require('path');
-const fs = require('fs');
 require("dotenv").config();
 const parseTorrent = require("parse-torrent");
 const fetch = require("node-fetch");
-// const { PM } = require("./pm");           ← ADD //
-// const AllDebrid = require("./ad");        ← ADD //
-// const DebridLink = require("./dl");       ← ADD //
+const { PM } = require("./pm");
+const AllDebrid = require("./ad");
+const DebridLink = require("./dl");
 const { XMLParser } = require("fast-xml-parser");
-// const RealDebrid = require("./rd");       ← ADD //
+const RealDebrid = require("./rd");
 const { fork } = require("child_process");
 
 let nbreAdded = 0;
@@ -150,7 +148,8 @@ let fetchNyaaRssTorrent2 = async (query, type) => {
 };
 
 let hosts = [];
-const raw_content = fs.readFileSync(path.join(__dirname, 'servers.txt'));
+
+const raw_content = require("fs").readFileSync("./servers.txt");
 let content = Buffer.isBuffer(raw_content)
   ? raw_content.toString()
   : raw_content;
@@ -164,7 +163,9 @@ hosts = content
       apiKey: el.split("|").pop(),
     };
   });
+
 hosts = hosts.filter((el) => !!el);
+
 // const api = "http://localhost:3009/torrent";
 const api = "https://nyaascrapper.vercel.app/torrent";
 
@@ -1408,6 +1409,7 @@ module.exports = {
   getImdbFromKitsu,
   isRedirect,
   getParsedFromMagnetorTorrentFile,
+  toStream,
   isVideo,
   getSize,
   getQuality,
@@ -1418,10 +1420,10 @@ module.exports = {
   cleanName,
   simplifiedName,
   getFittedFile,
-  // toDLStream,      ← ADD //
-  // toADStream,      ← ADD //
-  // toPMStream,      ← ADD //
-  // toRDStream,      ← ADD //
+  toDLStream,
+  toADStream,
+  toPMStream,
+  toRDStream,
   fetchNyaaRssTorrent,
   fetchNyaa,
   fetchNyaaRssTorrent2,

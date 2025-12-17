@@ -1,7 +1,6 @@
 {
   "name": "addon",
   "version": "1.0.1",
-  "type": "commonjs",
   "description": "NZB addon",
   "main": "index.js",
   "repository": "https://github.com/daniwalter001/jackett-addon.git",

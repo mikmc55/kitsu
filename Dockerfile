@@ -1,21 +1,23 @@
-FROM denoland/deno:2.1.4
+# Use the official Node.js 18 base image
+FROM node:18-slim
 
-WORKDIR /app
+# Set the working directory inside the container
+WORKDIR /usr/src/app
 
-# Copy package files
+# Copy the package.json and package-lock.json if available
 COPY package*.json ./
 
-# Install npm dependencies using Deno
-RUN deno install --allow-scripts
+# Install the app dependencies
+RUN npm install --production
 
-# Copy the rest of the application
+# Copy the rest of the application code to the container
 COPY . .
 
-# Set environment to production
+# Set environment variable to production
 ENV NODE_ENV=production
 
-# Expose the port
-EXPOSE 3003
+# Expose the port Hugging Face Spaces will bind to
+EXPOSE 3000
 
-# Run with Deno's Node compatibility mode
-CMD ["deno", "run", "--allow-all", "--unstable-detect-cjs", "index.js"]
+# Command to start the app
+CMD ["npm", "start"]

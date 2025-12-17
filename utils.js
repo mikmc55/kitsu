@@ -1,3 +1,5 @@
+const path = require('path');
+const fs = require('fs');
 require("dotenv").config();
 const parseTorrent = require("parse-torrent");
 const fetch = require("node-fetch");

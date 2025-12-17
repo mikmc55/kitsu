@@ -17,7 +17,7 @@ COPY . .
 ENV NODE_ENV=production
 
 # Expose the port Hugging Face Spaces will bind to
-EXPOSE 3003
+EXPOSE 3000
 
 # Command to start the app
 CMD ["npm", "start"]

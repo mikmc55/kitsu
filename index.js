@@ -239,8 +239,8 @@ app
 
     console.log({ "Retenus for filtering": result.length });
 
-    // OPTIMIZATION: Reduced from 20 to 10
-    const MAX_RES = process.env.MAX_RES ?? 10;
+    // OPTIMIZATION: Reduced for Vercel serverless limits
+    const MAX_RES = process.env.MAX_RES ?? 8;
     result = result?.length >= MAX_RES ? result.slice(0, MAX_RES) : result;
 
     // Filter out torrents with no magnet or peers
@@ -250,13 +250,13 @@ app
 
     console.log({ "Result after filtering": result.length });
 
-    // OPTIMIZATION: Parse torrents in parallel with higher concurrency
+    // Parse torrents - keep concurrency at 5 for Vercel stability
     torrentParsed = await UTILS.queue(
       result.map(
         (torrent) => () =>
           UTILS.getParsedFromMagnetorTorrentFile(torrent, torrent["MagnetUri"])
       ),
-      10 // Increased from 5 to 10 for parallel processing
+      5 // Keep at 5 for serverless stability
     );
     
     torrentParsed = torrentParsed.filter(

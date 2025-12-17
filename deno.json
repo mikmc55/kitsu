@@ -1,0 +1,7 @@
+{
+  "tasks": {
+    "start": "deno run --allow-net --allow-read --allow-env --allow-sys --unstable-detect-cjs index.js"
+  },
+  "nodeModulesDir": true,
+  "unstable": ["detect-cjs"]
+}

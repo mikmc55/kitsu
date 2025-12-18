@@ -16,6 +16,13 @@ const { search } = require("./search_handler");
 
 const redis = redisClient();
 
+// Helper to extract infohash from magnet URI
+function extractInfoHash(magnetUri) {
+  if (!magnetUri) return null;
+  const match = magnetUri.match(/btih:([a-fA-F0-9]{40})/i);
+  return match ? match[1].toUpperCase() : null;
+}
+
 // ----------------------------------------------
 app
   .get("/", (req, res) => {
@@ -224,76 +231,129 @@ app
 
     console.log({ "Result after removing low peers items": result.length });
 
-    // Parse torrents with your existing PM integration in utils.js
-    // OPTIMIZATION: Increased concurrency from 5 to 8 for faster parsing
-    torrentParsed = await UTILS.queue(
-      result.map(
-        (torrent) => () =>
-          UTILS.getParsedFromMagnetorTorrentFile(torrent, torrent["MagnetUri"])
-      ),
-      8
-    );
+    // ============ PM INTEGRATION - NO PARSING NEEDED ============
+    const { PM } = require("./pm");
     
-    torrentParsed = torrentParsed.filter(
-      (torrent) =>
-        torrent && torrent?.parsedTor && torrent?.parsedTor?.files?.length > 0
-    );
+    console.log("\n🔍 Checking Premiumize cache (no parsing required)...");
+    
+    let stream_results = [];
+    
+    for (const torrent of result) {
+      try {
+        // Extract infohash from magnet (no parsing needed!)
+        const infoHash = torrent["InfoHash"] || extractInfoHash(torrent["MagnetUri"]);
+        if (!infoHash) continue;
 
-    console.log({ "Parsed torrents": torrentParsed.length });
-
-    // Process torrents - PM integration in utils.js adds 'details' field for cached torrents
-    let stream_results = torrentParsed.map((tor) => {
-      let parsed = tor.parsedTor;
-      let infoHash = parsed.infoHash.toLowerCase();
-      let index = tor?.index ?? tor?.dlIndex ?? -1;
-
-      // If utils.js found it cached on PM and added 'details', use PM direct link
-      if (tor.details && tor.details.length > 0 && tor.details[0]["link"]) {
-        let dlIndex = tor.dlIndex ?? 0;
-        let file = tor.details[dlIndex];
-        let title = `${tor.Title}\n${file.name || file.path?.split('/').pop()}\n${UTILS.getSize(file.size || 0)} | 🌱 ${tor.Seeders}S ${tor.Peers}P`;
+        // Check PM cache
+        const cachedFilename = await PM.checkCached(infoHash);
         
-        console.log(`✅ PM cached: ${tor.Title.substring(0, 50)}...`);
+        if (!cachedFilename) {
+          console.log(`⏭️  Not cached: ${torrent["Title"].substring(0, 40)}...`);
+          continue;
+        }
+
+        console.log(`✅ Cached: ${cachedFilename}`);
+
+        // Get file list from PM (instant, no local parsing!)
+        const fileList = await PM.getDirectDl(infoHash);
         
-        return {
-          name: `[⚡PM⚡] Nyaa${UTILS.getQuality(file.name || file.path)}`,
-          title: title,
-          url: file.link || file.stream_link,
+        if (!fileList || !fileList.length) {
+          console.log(`⚠️  No files for: ${cachedFilename}`);
+          continue;
+        }
+
+        console.log(`📂 Got ${fileList.length} files`);
+
+        // Smart file selection
+        let selectedFile = null;
+        
+        if (media === "movie") {
+          // Find largest video file for movies
+          const videoFiles = fileList.filter(f => {
+            const path = f.path || f.name || "";
+            return /\.(mkv|mp4|avi|mov|wmv|m4v|webm)$/i.test(path);
+          });
+          
+          if (videoFiles.length > 0) {
+            selectedFile = videoFiles.reduce((max, f) => f.size > max.size ? f : max);
+          }
+        } else {
+          // Find episode in pack for series
+          const videoFiles = fileList.filter(f => {
+            const path = f.path || f.name || "";
+            return /\.(mkv|mp4|avi|mov|wmv|m4v|webm)$/i.test(path);
+          });
+
+          for (const file of videoFiles) {
+            const fileName = (file.path || file.name || "").toLowerCase();
+            
+            // Check episode patterns
+            const patterns = [
+              new RegExp(`s${s?.padStart(2, "0")}e${e?.padStart(2, "0")}`, 'i'),
+              new RegExp(`s${s}e${e?.padStart(2, "0")}`, 'i'),
+              new RegExp(`${s}x${e?.padStart(2, "0")}`, 'i'),
+            ];
+            
+            if (abs_episode) {
+              patterns.push(new RegExp(`e${abs_episode?.padStart(2, "0")}`, 'i'));
+            }
+
+            if (patterns.some(p => p.test(fileName))) {
+              selectedFile = file;
+              break;
+            }
+          }
+
+          // Fallback to largest if no match
+          if (!selectedFile && videoFiles.length > 0) {
+            selectedFile = videoFiles.reduce((max, f) => f.size > max.size ? f : max);
+          }
+        }
+
+        if (!selectedFile) {
+          console.log(`⚠️  No suitable file found`);
+          continue;
+        }
+
+        // Build stream
+        const fileName = (selectedFile.path || selectedFile.name || "").split('/').pop();
+        const fileSize = selectedFile.size 
+          ? `${(selectedFile.size / (1024 ** 3)).toFixed(2)} GB`
+          : torrent["Size"] || "Unknown";
+
+        let quality = "";
+        if (/2160p|4k/i.test(fileName)) quality = " 4K";
+        else if (/1080p/i.test(fileName)) quality = " 1080p";
+        else if (/720p/i.test(fileName)) quality = " 720p";
+        else if (/480p/i.test(fileName)) quality = " 480p";
+
+        const streamTitle = [
+          torrent["Title"],
+          `📁 ${fileName}`,
+          `💾 ${fileSize} | 🌱 ${torrent["Seeders"]}S ${torrent["Peers"]}P`,
+          `⚡ Premiumize - Instant Playback`
+        ].join('\n');
+
+        stream_results.push({
+          name: `[⚡PM⚡] Nyaa${quality}`,
+          title: streamTitle,
+          url: selectedFile.link || selectedFile.stream_link,
           behaviorHints: {
             bingeGroup: `nyaa-pm|${infoHash}`,
-            filename: file.name || file.path?.split('/').pop()
+            filename: fileName
           }
-        };
-      }
-      
-      // Otherwise, fallback to P2P stream
-      if (index === -1) {
-        index = parsed.files.findIndex((file) => {
-          let name = file.name?.toLowerCase() || "";
-          return UTILS.isVideo(file) && 
-                 UTILS.getFittedFile(name, s, e, abs, abs_season, abs_episode);
         });
+
+        console.log(`✅ Added: ${quality} ${fileSize}`);
+
+      } catch (error) {
+        console.log(`❌ Error: ${error.message}`);
+        continue;
       }
-      
-      if (index === -1) return null;
-      
-      let file = parsed.files[index];
-      let title = `${tor.Title}\n${file.name}\n${UTILS.getSize(file.length)} | 🌱 ${tor.Seeders}S ${tor.Peers}P`;
-      
-      return {
-        name: `Nyaa${UTILS.getQuality(file.name)}`,
-        title: title,
-        infoHash: infoHash,
-        fileIdx: index,
-        sources: (parsed.announce || [])
-          .map(x => `tracker:${x}`)
-          .concat([`dht:${infoHash}`]),
-        behaviorHints: { 
-          bingeGroup: `nyaa|${infoHash}`, 
-          notWebReady: true 
-        }
-      };
-    }).filter(s => s !== null);
+    }
+
+    console.log(`\n📊 PM Results: ${stream_results.length} streams`);
+    // ============ END PM INTEGRATION ============
 
     stream_results = stream_results.flat();
 
